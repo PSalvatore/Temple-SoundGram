@@ -1,7 +1,12 @@
 package edu.temple.soundgram;
 
+import java.io.BufferedOutputStream;
 import java.io.File;
+import java.io.FileOutputStream;
 import java.io.IOException;
+import java.io.InputStream;
+import java.net.HttpURLConnection;
+import java.net.URL;
 
 import org.json.JSONArray;
 import org.json.JSONException;
@@ -11,6 +16,7 @@ import com.nostra13.universalimageloader.core.ImageLoader;
 
 import edu.temple.soundgram.util.API;
 import edu.temple.soundgram.util.UploadSoundGramService;
+import android.annotation.SuppressLint;
 import android.app.Activity;
 import android.content.BroadcastReceiver;
 import android.content.Context;
@@ -19,11 +25,13 @@ import android.content.IntentFilter;
 import android.graphics.Color;
 import android.media.MediaPlayer;
 import android.net.Uri;
+import android.os.AsyncTask;
 import android.os.Bundle;
 import android.os.Environment;
 import android.os.Handler;
 import android.os.Message;
 import android.provider.MediaStore;
+import android.util.Log;
 import android.view.Menu;
 import android.view.MenuItem;
 import android.view.View;
@@ -32,6 +40,7 @@ import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.TableLayout;
 import android.widget.Toast;
+import org.apache.commons.io.FilenameUtils;
 
 public class MainActivity extends Activity {
 	
@@ -41,10 +50,10 @@ public class MainActivity extends Activity {
 	int TAKE_PICTURE_REQUEST_CODE = 11111111;
 	int RECORD_AUDIO_REQUEST_CODE = 11111112;
 	
-	File photo, audio;
+	File photo, audio, cache;
+	
 	
 	LinearLayout ll;
-	
 	
 	// Refresh stream
 	private BroadcastReceiver refreshReceiver = new BroadcastReceiver() {
@@ -75,6 +84,11 @@ public class MainActivity extends Activity {
 		ll = (LinearLayout) findViewById(R.id.imageLinearLayout);
 		
 		loadStream();
+		
+		//directory to cache audio
+		File directory = new File(".");
+		directory.mkdirs();
+		cache = directory;
 	}
 	
 	@Override
@@ -231,10 +245,10 @@ public class MainActivity extends Activity {
 		}
 	});
 	
+	
+	
 	private View getSoundGramView(final JSONObject soundgramObject){
 		LinearLayout soundgramLayout = new LinearLayout(this);
-		
-		
 		ImageView soundgramImageView = new ImageView(this);
 		LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(600, 600); // Set our image view to thumbnail size
 		soundgramImageView.setLayoutParams(lp);
@@ -248,20 +262,77 @@ public class MainActivity extends Activity {
 			
 			@Override
 			public void onClick(View v) {
-				MediaPlayer mPlayer = new MediaPlayer();
-		        try {
-		            mPlayer.setDataSource(soundgramObject.getString("audio_url"));
-		            mPlayer.prepare();
-		            mPlayer.start();
+				String audioPath = null;
+				try{
+					String audioUrl = soundgramObject.getString("audio_url") ;
+					String fileName = audioUrl.substring( audioUrl.lastIndexOf('=')+1, audioUrl.length() );
+					File f = new File(Environment.getExternalStorageDirectory()+ "/" + getString(R.string.app_name) + "/" + fileName);
+
+					if (!f.exists()){
+						Log.v("myapp", "file does not exist");
+						final DownloadTask downloadTask = new DownloadTask();
+						downloadTask.execute(audioUrl);
+						android.os.SystemClock.sleep(500); //wait half a second to ensure audio is downloaded before it is played
+					} else {
+						Log.v("myapp", "file exists");
+						
+					}
+					audioPath = Environment.getExternalStorageDirectory()+ "/" + getString(R.string.app_name) + "/" + fileName;
+					Log.v("myapp", "location: " + audioPath);
+
+					MediaPlayer mPlayer = new MediaPlayer();
+
+					mPlayer.setDataSource(audioPath);
+					mPlayer.prepare();
+					mPlayer.start();
+					Log.v("myapp", "audio played");
 				} catch (Exception e) {
+			 		Log.v("myapp", "click exception");
 					e.printStackTrace();
 				}
 			}
 		});
-		
 		soundgramLayout.addView(soundgramImageView);
 		
 		return soundgramLayout;
+	}
+	
+	// AsyncTask to download binary audio
+	private class DownloadTask extends AsyncTask<String, Void, String> {
+		private static final int BIN_AUDIO = 0;
+		
+		
+		 @Override
+		    protected String doInBackground(String... url) {
+			 	String fileName = url[0].substring( url[0].lastIndexOf('=')+1, url[0].length() );
+			 	
+			 	try{
+			 	URL u = new URL(url[0]);
+				HttpURLConnection c = (HttpURLConnection) u.openConnection();
+				c.setRequestMethod("GET");
+				c.setDoOutput(true);
+				c.connect();
+				
+				FileOutputStream fOut = new FileOutputStream(new File(Environment.getExternalStorageDirectory()
+						+ "/" + getString(R.string.app_name) + "/" + fileName));
+
+				InputStream in = c.getInputStream();
+
+				byte[] buffer = new byte[1024];
+				int len1 = 0;
+				while ( (len1 = in.read(buffer)) > 0 ) {
+					fOut.write(buffer,0, len1);
+				}
+				fOut.close();
+				
+			 	} catch (Exception e){
+			 		Log.v("myapp", "Async exception");
+			 		e.printStackTrace();
+			 	}
+			 	
+				return null;
+		 }
+		 
 	}
 	
 	@Override
@@ -269,8 +340,10 @@ public class MainActivity extends Activity {
 		super.onDestroy();
 		unregisterReceiver(refreshReceiver);
 	}
-	
 }
+
+	
+
 
 
 
